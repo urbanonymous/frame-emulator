@@ -1,0 +1,26 @@
+Welcome to the Frame Emulator!
+
+This is a sample text file that demonstrates the file reader functionality.
+The text will be displayed on the Frame's screen with proper formatting and scrolling.
+
+Features of the File Reader:
+- Loads text files over Bluetooth simulation
+- Displays text with proper formatting
+- Supports scrolling through long content
+- Shows progress and navigation info
+
+The Frame SDK provides a powerful set of APIs for:
+1. Display rendering
+2. Bluetooth communication
+3. File system operations
+4. Input handling
+
+You can scroll through this text using:
+UP arrow - Move up one line
+DOWN arrow - Move down one line
+
+This demo shows how the Frame can:
+- Receive files over Bluetooth
+- Store them in the file system
+- Display them with proper formatting
+- Handle user input for navigation

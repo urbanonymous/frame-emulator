@@ -1,179 +1,151 @@
 #!/usr/bin/env python3
 """
-Example script showing how to use the Frame Emulator Python API directly without Lua.
+Direct API Example
 
-This example demonstrates how to:
-1. Import the Frame Emulator library
-2. Configure the emulator
-3. Draw directly to the display using Python
+This example demonstrates using the Frame Emulator directly from Python,
+without using Lua scripts. It shows basic drawing, text rendering,
+and color manipulation.
 """
 
-import os
 import sys
-import math
+import tempfile
 import time
-from frame_emulator.emulator import FrameEmulator, EmulatorConfig
+from pathlib import Path
 
-class FrameDemo:
-    """Demo application for Frame Emulator."""
+# Add parent directory to path so we can import the module
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from frame_emulator.emulator import EmulatorConfig, run_emulator
+
+
+def main():
+    print("Frame Emulator - Direct API Example")
+
+    # Create a temporary Lua script with our demo
+    lua_script = """
+    -- Demo content
+    local text = [[The Frame Emulator can be used directly from Python!
     
-    def __init__(self):
-        """Initialize the demo."""
-        # Create config
-        config = EmulatorConfig(
-            width=640,
-            height=400,
-            scale=1.5,
-            fps=60,
-            title="Frame Emulator Direct API Demo"
+This example shows:
+- Text rendering with different colors
+- Basic shapes and drawing
+- Color palette usage
+- Display updates
+    ]]
+    
+    local frame_count = 0
+    local start_time = frame.time.utc()
+    
+    while frame.time.utc() - start_time < 10 do  -- Run for 10 seconds
+        -- Clear screen
+        frame.display.clear(frame.display.PaletteColors.VOID)
+        
+        -- Draw title
+        frame.display.write_text(
+            320, 20,
+            "Frame Direct API Demo",
+            frame.display.PaletteColors.SKYBLUE,
+            24,
+            frame.display.Alignment.TOP_CENTER
         )
         
-        # Create the emulator
-        self.emulator = FrameEmulator(config)
-        self.frame_count = 0
-        self.start_time = time.time()
+        -- Draw multiline text
+        local y = 80
+        for line in text:gmatch("[^\\n]+") do
+            frame.display.write_text(
+                20, y,
+                line:match("^%s*(.-)%s*$"),  -- Trim whitespace
+                frame.display.PaletteColors.WHITE,
+                16
+            )
+            y = y + 30
+        end
         
-    def run(self):
-        """Run the demo."""
-        print("Starting Frame Emulator Direct API Demo")
-        print("Press Ctrl+C to exit or close the window.")
+        -- Draw some shapes
+        -- Animated rectangle with border
+        local pulse = (frame.time.utc() * 2) % 1  -- 0 to 1 pulse
+        local border_width = math.floor(2 + pulse * 4)  -- 2 to 6 pixels
         
-        try:
-            # Main loop
-            while self.emulator.running:
-                self.update()
-                self.render()
-                self.emulator.render_frame()
-                
-        except KeyboardInterrupt:
-            print("Demo stopped by user")
-        finally:
-            self.emulator.stop()
-    
-    def update(self):
-        """Update demo state."""
-        self.frame_count += 1
+        frame.display.draw_rect_filled(
+            40, 250,
+            200, 100,
+            border_width,
+            frame.display.PaletteColors.PINK,
+            frame.display.PaletteColors.NIGHTBLUE
+        )
         
-    def render(self):
-        """Render current frame."""
-        # Choose a demo based on time
-        elapsed = time.time() - self.start_time
-        demo_index = int(elapsed / 5) % 4
+        -- Color palette demo
+        local x = 280
+        local y = 250
+        local square_size = 30
+        local gap = 5
         
-        if demo_index == 0:
-            self.draw_rainbow()
-        elif demo_index == 1:
-            self.draw_rectangles()
-        elif demo_index == 2:
-            self.draw_text()
-        else:
-            self.draw_animation()
-    
-    def draw_rainbow(self):
-        """Draw a rainbow gradient."""
-        width = self.emulator.width
-        height = self.emulator.height
+        frame.display.write_text(
+            x, y - 20,
+            "Color Palette:",
+            frame.display.PaletteColors.WHITE,
+            16
+        )
         
-        # Draw a gradient based on row position
-        for y in range(height):
-            hue = (y / height) * 360
+        for i = 0, 15 do  -- 16 colors in palette
+            local color_x = x + (i % 8) * (square_size + gap)
+            local color_y = y + math.floor(i / 8) * (square_size + gap)
             
-            # Convert HSV to RGB
-            h = hue / 60
-            i = int(h)
-            f = h - i
-            p = 0
-            q = 1 - f
-            t = f
+            -- Draw color square
+            frame.display.fill_rect(
+                color_x, color_y,
+                square_size, square_size,
+                i
+            )
             
-            r, g, b = 0, 0, 0
-            
-            if i == 0:
-                r, g, b = 1, t, p
-            elif i == 1:
-                r, g, b = q, 1, p
-            elif i == 2:
-                r, g, b = p, 1, t
-            elif i == 3:
-                r, g, b = p, q, 1
-            elif i == 4:
-                r, g, b = t, p, 1
-            else:
-                r, g, b = 1, p, q
-            
-            # Convert to 0-255 range
-            r, g, b = int(r * 255), int(g * 255), int(b * 255)
-            
-            # Draw a horizontal line with this color
-            for x in range(width):
-                self.emulator.set_pixel(x, y, (r << 16) | (g << 8) | b)
-    
-    def draw_rectangles(self):
-        """Draw colored rectangles."""
-        # Clear screen
-        self.emulator.clear(0x000000)
+            -- Draw color index
+            local text_color = i == 1 and 0 or 1  -- Black on white, white on others
+            frame.display.write_text(
+                color_x + square_size/2,
+                color_y + square_size/2,
+                tostring(i),
+                text_color,
+                12,
+                frame.display.Alignment.MIDDLE_CENTER
+            )
+        end
         
-        # Draw some rectangles with different colors
-        self.emulator.fill_rect(50, 50, 100, 100, 0xFF0000)   # Red
-        self.emulator.fill_rect(200, 50, 100, 100, 0x00FF00)  # Green
-        self.emulator.fill_rect(350, 50, 100, 100, 0x0000FF)  # Blue
+        -- Show frame counter
+        frame.display.write_text(
+            320, 380,
+            "Frame: " .. frame_count,
+            frame.display.PaletteColors.GRAY,
+            12,
+            frame.display.Alignment.BOTTOM_CENTER
+        )
         
-        # Animate a rectangle
-        t = time.time() - self.start_time
-        x = 100 + int(100 * math.sin(t))
-        self.emulator.fill_rect(x, 200, 100, 100, 0xFFFF00)   # Yellow
-    
-    def draw_text(self):
-        """Draw text demo."""
-        # Clear screen
-        self.emulator.clear(0x000000)
+        -- Update display
+        frame.display.show()
+        frame_count = frame_count + 1
         
-        # Draw title
-        self.emulator.draw_text(120, 50, "Frame Emulator Python API", 0xFFFFFF, 24)
-        
-        # Draw some example text in different colors
-        self.emulator.draw_text(100, 120, "Hello from Python!", 0xFF0000, 20)
-        self.emulator.draw_text(100, 160, "This is a text demo", 0x00FF00, 20)
-        self.emulator.draw_text(100, 200, "Direct API access", 0x0000FF, 20)
-        self.emulator.draw_text(100, 240, "No Lua required", 0xFFFF00, 20)
-        
-        # Draw footer with frame count
-        fps = self.frame_count / (time.time() - self.start_time)
-        self.emulator.draw_text(160, 320, f"Frame: {self.frame_count} (FPS: {fps:.1f})", 0xFFFFFF, 16)
-    
-    def draw_animation(self):
-        """Draw an animated pattern."""
-        # Clear screen
-        self.emulator.clear(0x000000)
-        
-        # Draw parameters
-        center_x = 320
-        center_y = 200
-        radius = 100
-        max_dots = 12
-        
-        # Timing
-        t = time.time() - self.start_time
-        
-        # Draw spinning dots
-        for i in range(max_dots):
-            angle = (t * 2) + (i * (2 * math.pi / max_dots))
-            x = center_x + radius * math.cos(angle)
-            y = center_y + radius * math.sin(angle)
-            
-            # Calculate color based on position
-            r = 128 + int(127 * math.sin(angle))
-            g = 128 + int(127 * math.sin(angle + 2))
-            b = 128 + int(127 * math.sin(angle + 4))
-            
-            # Draw the dot
-            size = 10 + int(5 * math.sin(t + i))
-            self.emulator.fill_rect(int(x - size/2), int(y - size/2), size, size, (r << 16) | (g << 8) | b)
-        
-        # Draw title
-        self.emulator.draw_text(220, 50, "Animation Demo", 0xFFFFFF, 20)
+        -- Add a small delay to control frame rate
+        frame.sleep(1/60)  -- Target 60 FPS
+    end
+    """
+
+    # Create a temporary file for the Lua script
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".lua", delete=False) as f:
+        f.write(lua_script)
+        script_path = f.name
+
+    try:
+        # Create emulator with configuration
+        config = EmulatorConfig(
+            width=640, height=400, scale=1.5, title="Frame Direct API Demo"
+        )
+
+        # Run the emulator with our script
+        run_emulator(script_path, config)
+
+    finally:
+        # Clean up the temporary script file
+        Path(script_path).unlink()
 
 
 if __name__ == "__main__":
-    demo = FrameDemo()
-    demo.run() 
+    main()
