@@ -12,23 +12,9 @@ from .constants import (
     BLE_DATA_FINAL,
     BLE_DATA_RAW,
     BluetoothState,
+    FrameDataTypePrefixes,
+    FRAME_DATA_PREFIX,
 )
-
-
-class FrameDataTypePrefixes(Enum):
-    """Frame data type prefixes for different kinds of data."""
-
-    LONG_DATA = 0x01
-    LONG_DATA_END = 0x02
-    WAKE = 0x03
-    TAP = 0x04
-    MIC_DATA = 0x05
-    DEBUG_PRINT = 0x06
-    LONG_TEXT = 0x0A
-    LONG_TEXT_END = 0x0B
-
-
-_FRAME_DATA_PREFIX = 1
 
 
 class BluetoothManager:
@@ -36,20 +22,25 @@ class BluetoothManager:
 
     def __init__(self, host="localhost", port=5555):
         """Initialize Bluetooth manager."""
-        self.state = "unpaired"
-        self.mtu = 512  # Configurable MTU size
-        self.data_queue = []
-        self.receive_callback = None
-        self.chunk_count = 0
-        self.script_running = False
-        self.notifications_enabled = False
-        self.virtual_fs: Dict[str, bytes] = {}
-
-        # TCP socket setup
         self.host = host
         self.port = port
         self.server_socket = None
         self.client_socket = None
+        self.state = BluetoothState.UNPAIRED
+        self.virtual_fs: Dict[str, bytes] = {}
+        self.receive_callback = None
+        self.script_running = False
+        
+        # Buffer for accumulating chunked data
+        self.data_buffer = bytearray()
+        self.receiving_long_data = False
+        self.expected_length = 0
+        
+        # Thread management
+        self.running = True
+        self.accept_thread = None
+        self.receive_thread = None
+        
         self._start_server()
 
     def _start_server(self):
@@ -71,53 +62,133 @@ class BluetoothManager:
 
     def _accept_connections(self):
         """Accept incoming connections."""
-        while True:
+        while self.running:
             try:
-                client_socket, addr = self.server_socket.accept()
-                print(f"[Bluetooth] Connection from {addr}")
-                self.client_socket = client_socket
-                self.state = "connected"
+                # Set a timeout so we can check if we're still running
+                self.server_socket.settimeout(1.0)
+                try:
+                    client_socket, addr = self.server_socket.accept()
+                    print(f"[Bluetooth] Connection from {addr}")
+                    
+                    # Close any existing client connection
+                    if self.client_socket:
+                        try:
+                            self.client_socket.close()
+                        except:
+                            pass
+                    
+                    self.client_socket = client_socket
+                    self.state = BluetoothState.CONNECTED
 
-                # Start receiving data from this client
-                self.receive_thread = threading.Thread(target=self._receive_data)
-                self.receive_thread.daemon = True
-                self.receive_thread.start()
+                    # Start receiving data from this client
+                    if self.receive_thread and self.receive_thread.is_alive():
+                        # Wait for previous thread to finish
+                        self.receive_thread.join(timeout=1.0)
+                        
+                    self.receive_thread = threading.Thread(target=self._receive_data)
+                    self.receive_thread.daemon = True
+                    self.receive_thread.start()
+                except socket.timeout:
+                    # This is expected, just continue the loop
+                    continue
             except Exception as e:
-                print(f"[Bluetooth] Connection error: {e}")
+                if self.running:  # Only log if we're supposed to be running
+                    print(f"[Bluetooth] Connection error: {e}")
                 time.sleep(1)
 
     def _receive_data(self):
         """Receive data from connected client."""
-        while self.state == "connected":
+        while self.running and self.state == BluetoothState.CONNECTED:
             try:
-                # Read 2-byte length prefix
-                length_bytes = self.client_socket.recv(2)
-                if not length_bytes:
-                    break
-
-                length = int.from_bytes(length_bytes, "big")
-                if length > 0:
-                    # Read the actual data
-                    data = self.client_socket.recv(length)
-                    if not data:
+                # Set a short timeout to check if we're still running
+                self.client_socket.settimeout(0.5)
+                try:
+                    # Read 2-byte length prefix
+                    length_bytes = self.client_socket.recv(2)
+                    if not length_bytes or len(length_bytes) < 2:
+                        print("[Bluetooth] Connection closed (incomplete header)")
                         break
-                    self._handle_received_data(data)
+                    
+                    length = int.from_bytes(length_bytes, "big")
+                    print(f"[Bluetooth] Expecting message of length: {length} bytes")
+                    
+                    if length > 0:
+                        # Read the full data (may need multiple recv calls)
+                        received_data = bytearray()
+                        remaining = length
+                        
+                        while remaining > 0 and self.running:
+                            try:
+                                chunk = self.client_socket.recv(min(4096, remaining))
+                                if not chunk:
+                                    print("[Bluetooth] Connection closed during data transfer")
+                                    break
+                                
+                                received_data.extend(chunk)
+                                remaining -= len(chunk)
+                            except socket.timeout:
+                                # Check if we should continue
+                                continue
+                        
+                        if len(received_data) == length:
+                            print(f"[Bluetooth] Received complete message ({length} bytes)")
+                            self._handle_received_data(bytes(received_data))
+                        else:
+                            print(f"[Bluetooth] Received incomplete message: {len(received_data)}/{length} bytes")
+                except socket.timeout:
+                    # This is expected, just continue the loop
+                    continue
             except Exception as e:
-                print(f"[Bluetooth] Receive error: {e}")
+                if self.running:  # Only log if we're supposed to be running
+                    print(f"[Bluetooth] Receive error: {e}")
                 break
+        
+        # Close the connection when the loop exits
         self.disconnect()
 
     def _handle_received_data(self, data: bytes):
         """Handle received data based on its prefix."""
         try:
-            # Handle Lua code (no special prefix)
-            if len(data) > 0 and data[0] not in [
-                p.value for p in FrameDataTypePrefixes
-            ]:
-                if self.receive_callback:
-                    self.receive_callback(data)
-                return
-
+            # More detailed logging for debugging
+            first_bytes = ' '.join([f"{b:02x}" for b in data[:10]]) if data else ""
+            print(f"[Bluetooth] Received data: {data[:20]}... (first bytes: {first_bytes})")
+            
+            # Special handling for Lua code
+            # If it starts with newline or ASCII characters, treat as Lua code
+            if len(data) > 0:
+                first_byte = data[0]
+                # Check if it's likely Lua code (starts with whitespace, ASCII characters, or common Lua constructs)
+                is_lua_code = (
+                    (first_byte in (0x0A, 0x0D, 0x09, 0x20))  # Whitespace: newline, CR, tab, space
+                    or (first_byte >= 0x21 and first_byte <= 0x7E)  # Printable ASCII
+                    or (len(data) > 2 and data[:2] == b'--')  # Lua comment
+                    or (len(data) > 5 and data[:5] in (b'local', b'print', b'frame'))  # Common Lua keywords
+                )
+                
+                if is_lua_code:
+                    print(f"[Bluetooth] Identified as Lua code (length: {len(data)})")
+                    if len(data) > 50:
+                        print(f"[Bluetooth] Lua code preview: {data[:50].decode('utf-8', errors='replace')}...")
+                    else:
+                        print(f"[Bluetooth] Lua code: {data.decode('utf-8', errors='replace')}")
+                    
+                    try:
+                        # Try to decode and execute the Lua code
+                        lua_code = data.decode('utf-8')
+                        print(f"[Bluetooth] Executing Lua code...")
+                        
+                        # Process using the receive callback if set
+                        if self.receive_callback:
+                            self.receive_callback(data)
+                            print(f"[Bluetooth] Lua execution completed")
+                        else:
+                            print(f"[Bluetooth] No receive callback set!")
+                    except Exception as e:
+                        print(f"[Bluetooth] Error processing Lua code: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    return
+            
             # Handle control signals
             if data == b"\x03":  # Break signal
                 print("[Bluetooth] Break signal received")
@@ -135,28 +206,57 @@ class BluetoothManager:
                 prefix = data[0]
                 payload = data[1:]
 
-                if prefix == _FRAME_DATA_PREFIX:
+                if prefix == FRAME_DATA_PREFIX:
                     if len(payload) > 0:
                         data_type = payload[0]
                         data_content = payload[1:]
 
                         if data_type == FrameDataTypePrefixes.LONG_DATA.value:
-                            # Handle chunked data
+                            # Start or continue receiving chunked data
+                            self.receiving_long_data = True
+                            self.data_buffer.extend(data_content)
+                            print(f"[Bluetooth] Received data chunk ({len(data_content)} bytes)")
                             self._send_response(
                                 bytes(
                                     [
-                                        _FRAME_DATA_PREFIX,
+                                        FRAME_DATA_PREFIX,
                                         FrameDataTypePrefixes.LONG_DATA.value,
                                     ]
                                 )
                                 + b"OK"
                             )
                         elif data_type == FrameDataTypePrefixes.LONG_DATA_END.value:
-                            # Handle end of chunked data
+                            # Final chunk of data
+                            self.receiving_long_data = False
+                            
+                            # Extract count if present (before the actual data)
+                            count_end = 0
+                            for i, b in enumerate(data_content):
+                                if b < ord('0') or b > ord('9'):
+                                    count_end = i
+                                    break
+                            
+                            if count_end > 0:
+                                try:
+                                    count = int(data_content[:count_end].decode())
+                                    print(f"[Bluetooth] Final chunk of {count} total chunks")
+                                except ValueError:
+                                    print("[Bluetooth] Error parsing chunk count")
+                            
+                            # Add the final data to buffer
+                            self.data_buffer.extend(data_content[count_end:])
+                            
+                            # Process the complete data
+                            if self.receive_callback and self.data_buffer:
+                                self.receive_callback(bytes(self.data_buffer))
+                            
+                            # Clear buffer for next time
+                            self.data_buffer.clear()
+                            
                             self._send_response(
                                 bytes(
                                     [
-                                        _FRAME_DATA_PREFIX,
+                                        FRAME_DATA_PREFIX,
                                         FrameDataTypePrefixes.LONG_DATA_END.value,
                                     ]
                                 )
@@ -168,7 +268,7 @@ class BluetoothManager:
 
     def _send_response(self, data: bytes):
         """Send a response with proper length prefix."""
-        if self.state == "connected" and self.client_socket:
+        if self.state == BluetoothState.CONNECTED and self.client_socket:
             try:
                 length_bytes = len(data).to_bytes(2, "big")
                 self.client_socket.sendall(length_bytes + data)
@@ -177,15 +277,15 @@ class BluetoothManager:
 
     def pair(self) -> bool:
         """Simulate pairing with the Frame device."""
-        if self.state == "unpaired":
-            self.state = "paired"
+        if self.state == BluetoothState.UNPAIRED:
+            self.state = BluetoothState.PAIRED
             print("[Bluetooth] Device paired successfully")
             return True
         return False
 
     def connect(self) -> bool:
         """Wait for client connection."""
-        return self.state == "connected"
+        return self.state == BluetoothState.CONNECTED
 
     def disconnect(self) -> bool:
         """Disconnect current client."""
@@ -195,7 +295,7 @@ class BluetoothManager:
             except:
                 pass
             self.client_socket = None
-        self.state = "paired"
+        self.state = BluetoothState.UNPAIRED
         print("[Bluetooth] Device disconnected")
         return True
 
@@ -207,21 +307,46 @@ class BluetoothManager:
                 self.server_socket.close()
             except:
                 pass
-        self.state = "unpaired"
+            self.server_socket = None
+        self.state = BluetoothState.UNPAIRED
         print("[Bluetooth] Device unpaired")
         return True
+    
+    def shutdown(self) -> None:
+        """Completely shut down the Bluetooth manager and all threads."""
+        # Signal threads to stop
+        self.running = False
+        
+        # Disconnect client
+        self.disconnect()
+        
+        # Close server socket
+        if self.server_socket:
+            try:
+                self.server_socket.close()
+            except:
+                pass
+            self.server_socket = None
+        
+        # Wait for threads to finish (with timeout)
+        if self.accept_thread and self.accept_thread.is_alive():
+            self.accept_thread.join(timeout=2.0)
+            
+        if self.receive_thread and self.receive_thread.is_alive():
+            self.receive_thread.join(timeout=2.0)
+        
+        print("[Bluetooth] Manager shutdown complete")
 
     def enable_notifications(self) -> bool:
         """Enable notifications for the RX characteristic."""
-        if self.state == "connected":
-            self.notifications_enabled = True
+        if self.state == BluetoothState.CONNECTED:
             print("[Bluetooth] RX notifications enabled")
             return True
         return False
 
     def send(self, data: Any) -> bool:
         """Send data to connected client."""
-        if self.state != "connected" or not self.client_socket:
+        if self.state != BluetoothState.CONNECTED or not self.client_socket:
             print("[Bluetooth] Error: Device not connected")
             return False
 

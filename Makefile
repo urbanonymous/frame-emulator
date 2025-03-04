@@ -9,9 +9,16 @@ setup:
 hello-world: setup
 	@echo "Starting Frame emulator..."
 	uv run python examples/run_emulator.py &
-	@sleep 2  # Give emulator time to start
+	@echo "Waiting for emulator to initialize..."
+	@sleep 3  # Give emulator more time to start properly
 	@echo "Running hello world client..."
-	uv run python examples/hello_world_client.py
+	uv run python examples/hello_world_client.py || { \
+		echo "Error running hello world client. Is the emulator running?"; \
+		echo "You can try running the emulator and client in separate terminals:"; \
+		echo "  Terminal 1: uv run python examples/run_emulator.py"; \
+		echo "  Terminal 2: uv run python examples/hello_world_client.py"; \
+		exit 1; \
+	}
 
 # Clean up build artifacts and cache files
 clean:

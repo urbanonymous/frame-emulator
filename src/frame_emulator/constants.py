@@ -45,6 +45,23 @@ class PaletteColors(Enum):
     CLOUDBLUE = 15
 
 
+class FrameDataTypePrefixes(Enum):
+    """Frame data type prefixes for different kinds of data."""
+
+    LONG_DATA = 0x01
+    LONG_DATA_END = 0x02
+    WAKE = 0x03
+    TAP = 0x04
+    MIC_DATA = 0x05
+    DEBUG_PRINT = 0x06
+    LONG_TEXT = 0x0A
+    LONG_TEXT_END = 0x0B
+
+
+# Common Frame Data prefix
+FRAME_DATA_PREFIX = 1
+
+
 class Alignment(Enum):
     """Text alignment options matching the Frame SDK."""
 

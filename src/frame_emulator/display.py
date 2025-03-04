@@ -446,32 +446,41 @@ class DisplayManager:
     def assign_color_ycbcr(
         self, color: Union[str, int, PaletteColors], y: int, cb: int, cr: int
     ) -> None:
-        """Change a palette color using YCbCr values."""
-        # Get color enum from name or index
-        if isinstance(color, str):
-            try:
-                color = PaletteColors[color.upper()]
-            except KeyError:
-                return
-        elif isinstance(color, int):
-            try:
-                color = PaletteColors(color)
-            except ValueError:
-                return
+        """
+        Assign a color from YCbCr values.
+        
+        Args:
+            color: Color name or index to assign to
+            y: Y component (0-255)
+            cb: Cb component (0-255)
+            cr: Cr component (0-255)
+        """
+        # Clip values to range
+        y = max(0, min(255, y))
+        cb = max(0, min(255, cb))
+        cr = max(0, min(255, cr))
+        
+        # Convert to RGB
+        r = int(y + 1.402 * (cr - 128))
+        g = int(y - 0.344136 * (cb - 128) - 0.714136 * (cr - 128))
+        b = int(y + 1.772 * (cb - 128))
+        
+        # Clip RGB values
+        r = max(0, min(255, r))
+        g = max(0, min(255, g))
+        b = max(0, min(255, b))
+        
+        # Assign the color
+        self.assign_color(color, r, g, b)
 
-        # Clamp values to valid ranges
-        y = max(0, min(15, y))
-        cb = max(0, min(7, cb))
-        cr = max(0, min(7, cr))
-
-        # Convert YCbCr back to RGB (simplified)
-        y = (y << 4) | y  # Expand to 8 bits
-        cb = (cb << 5) | (cb << 2) | (cb >> 1)  # Expand to 8 bits
-        cr = (cr << 5) | (cr << 2) | (cr >> 1)  # Expand to 8 bits
-
-        r = max(0, min(255, int(y + 1.402 * (cr - 128))))
-        g = max(0, min(255, int(y - 0.344136 * (cb - 128) - 0.714136 * (cr - 128))))
-        b = max(0, min(255, int(y + 1.772 * (cb - 128))))
-
-        # Update the palette
-        self.color_palette[color] = (r, g, b)
+    def set_palette(self, colors: Dict[Union[str, int], Tuple[int, int, int]]) -> None:
+        """
+        Set multiple colors in the palette at once.
+        
+        Args:
+            colors: Dictionary mapping color names/indices to RGB tuples
+        """
+        for color, rgb in colors.items():
+            if len(rgb) == 3:
+                r, g, b = rgb
+                self.assign_color(color, r, g, b)

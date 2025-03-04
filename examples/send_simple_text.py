@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
+"""
+Simple Text Display Client
+
+This script connects to the Frame emulator and sends the simple_text_display.lua
+script which directly displays text without needing to receive file content.
+
+Run this after starting 'python examples/run_emulator.py' in another terminal.
+"""
 
 import asyncio
 import sys
 import time
+from pathlib import Path
 
 from frame_emulator.frame_sdk import Frame
 
@@ -12,7 +21,28 @@ async def print_handler(text: str):
     print(f"Frame output: {text}")
 
 
+def read_file_content(file_path):
+    """Read content from a file."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as file:
+            return file.read()
+    except Exception as e:
+        print(f"Error reading file {file_path}: {e}")
+        return None
+
+
 async def main():
+    # Path to the Lua script
+    lua_script_path = str(Path(__file__).parent / "simple_text_display.lua")
+    
+    # Read the Lua script
+    lua_script = read_file_content(lua_script_path)
+    if not lua_script:
+        print("Failed to read the Lua script file!")
+        return 1
+    
+    print(f"Read {len(lua_script)} bytes from simple_text_display.lua")
+    
     # Create Frame client
     frame = Frame("localhost", 5555)
     frame.set_debugging(True)  # Enable debug output
@@ -36,58 +66,33 @@ async def main():
             print("Make sure the emulator is running (examples/run_emulator.py)")
             return 1
     
-    print("Connected! Sending Lua code...")
-
-    # Send Lua code to display hello world
-    lua_code = """
-    -- Clear the screen to black (color 0)
-    frame.display.clear(0)
+    print("Connected! Sending Lua script...")
     
-    -- Set up our text
-    local text = "Hello World!"
-    
-    -- Calculate center position
-    -- Note: Frame display is 640x400
-    local x = 320
-    local y = 200
-    
-    -- Draw white text (color 1) centered on screen
-    frame.display.write_text(x, y, text, 1, 20, "MIDDLE_CENTER")
-    
-    -- Add some color!
-    frame.display.write_text(x, y - 40, "Welcome to", 3, 16, "MIDDLE_CENTER")  -- Red
-    frame.display.write_text(x, y + 40, "Frame Emulator!", 14, 16, "MIDDLE_CENTER")  -- Sky Blue
-    
-    -- Show everything
-    frame.display.show()
-    
-    -- Print some debug info
-    print("Hello World displayed!")
-    """
-
-    # Send the code with retry logic
+    # Send Lua script with retry logic
     send_attempts = 0
     max_send_attempts = 3
     
     while send_attempts < max_send_attempts:
-        if frame.send(lua_code):
+        if frame.send(lua_script):
             break
             
         send_attempts += 1
         if send_attempts < max_send_attempts:
-            print(f"Send attempt {send_attempts} failed. Retrying in 1 second...")
+            print(f"Script send attempt {send_attempts} failed. Retrying in 1 second...")
             await asyncio.sleep(1)
         else:
-            print("Failed to send Lua code after multiple attempts!")
+            print("Failed to send Lua script after multiple attempts!")
             frame.disconnect()
             return 1
-
-    print("\nLua code sent successfully!")
-    print("The emulator window should now show the hello world message")
-    print("\nPress Ctrl+C to exit...")
+    
+    print("\nLua script sent successfully!")
+    print("The emulator window should now show the text display")
+    print("You can use UP/DOWN arrow keys or SPACE to scroll through the text")
+    print("\nKeeping connection alive to receive output...")
+    print("Press Ctrl+C to exit...")
 
     try:
-        # Keep the connection alive
+        # Keep the connection alive to receive output
         while True:
             await asyncio.sleep(1)
     except KeyboardInterrupt:
@@ -109,4 +114,4 @@ if __name__ == "__main__":
         sys.exit(exit_code)
     except KeyboardInterrupt:
         print("\nProgram interrupted by user.")
-        sys.exit(0)
+        sys.exit(0) 

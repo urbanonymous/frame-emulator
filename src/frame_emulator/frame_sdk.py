@@ -3,24 +3,16 @@
 import asyncio
 import socket
 import time
-from enum import Enum
 from typing import Callable, Dict, Optional
 
-
-class FrameDataTypePrefixes(Enum):
-    """Frame data type prefixes for different kinds of data."""
-
-    LONG_DATA = 0x01
-    LONG_DATA_END = 0x02
-    WAKE = 0x03
-    TAP = 0x04
-    MIC_DATA = 0x05
-    DEBUG_PRINT = 0x06
-    LONG_TEXT = 0x0A
-    LONG_TEXT_END = 0x0B
-
-
-_FRAME_DATA_PREFIX = 1
+from .constants import (
+    BLE_CONTROL_RESTART,
+    BLE_CONTROL_TERMINATE,
+    BLE_DATA_FINAL,
+    BLE_DATA_RAW,
+    FrameDataTypePrefixes,
+    FRAME_DATA_PREFIX,
+)
 
 
 class Frame:
@@ -94,7 +86,7 @@ class Frame:
         """Send raw data to the Frame emulator."""
         if not chunked or len(data) <= self._max_payload_size:
             # Send as single chunk
-            return self._send_with_length(bytes([_FRAME_DATA_PREFIX]) + data)
+            return self._send_with_length(bytes([FRAME_DATA_PREFIX]) + data)
         else:
             # Send as multiple chunks
             chunk_size = self._max_payload_size - 2  # Account for prefix bytes
@@ -103,14 +95,14 @@ class Frame:
             # Send each chunk
             for chunk in chunks[:-1]:
                 prefix = bytes(
-                    [_FRAME_DATA_PREFIX, FrameDataTypePrefixes.LONG_DATA.value]
+                    [FRAME_DATA_PREFIX, FrameDataTypePrefixes.LONG_DATA.value]
                 )
                 if not self._send_with_length(prefix + chunk):
                     return False
 
             # Send final chunk with count
             prefix = bytes(
-                [_FRAME_DATA_PREFIX, FrameDataTypePrefixes.LONG_DATA_END.value]
+                [FRAME_DATA_PREFIX, FrameDataTypePrefixes.LONG_DATA_END.value]
             )
             return self._send_with_length(
                 prefix + str(len(chunks)).encode() + chunks[-1]

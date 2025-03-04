@@ -63,6 +63,33 @@ class FrameEmulator:
             print("Bluetooth ready")
             self.bluetooth.connect()
             self.bluetooth.enable_notifications()
+            
+            # Set up callback to execute received Lua code
+            def receive_callback(data):
+                if isinstance(data, bytes):
+                    try:
+                        # First few bytes may contain control characters, try to clean
+                        lua_code = data.decode('utf-8', errors='ignore').strip()
+                        
+                        # Display some useful debug information
+                        print(f"[Bluetooth] Received data length: {len(data)} bytes")
+                        print(f"[Bluetooth] First 50 bytes: {data[:50]}")
+                        print(f"[Bluetooth] Executing Lua code...")
+                        
+                        # Execute the Lua code
+                        self.lua.execute(lua_code)
+                        print(f"[Bluetooth] Lua code executed successfully")
+                    except UnicodeDecodeError as e:
+                        print(f"[Bluetooth] Error decoding Lua code: {e}")
+                    except Exception as e:
+                        print(f"[Bluetooth] Error executing Lua code: {e}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print(f"[Bluetooth] Received non-bytes data: {type(data)}")
+            
+            # Register the callback
+            self.bluetooth.set_receive_callback(receive_callback)
         
         clock = pygame.time.Clock()
         frame_count = 0
@@ -86,9 +113,16 @@ class FrameEmulator:
                 self.display.render_frame(self.config.title, frame_count, clock)
                 frame_count += 1
                 clock.tick(self.config.fps)
-                
+        
+        except Exception as e:
+            print(f"Error in emulator: {e}")
+            import traceback
+            traceback.print_exc()
+        
         finally:
-            # Clean up
-            self.bluetooth.disconnect()
-            self.bluetooth.unpair()
+            # Clean up resources
             pygame.quit()
+            
+            # Properly shutdown Bluetooth if initialized
+            if hasattr(self, 'bluetooth') and self.bluetooth:
+                self.bluetooth.shutdown()

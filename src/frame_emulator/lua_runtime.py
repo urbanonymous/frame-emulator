@@ -201,6 +201,34 @@ class LuaManager:
         finally:
             self.emulator.bluetooth.script_running = False
 
+    def execute(self, lua_code: str) -> None:
+        """
+        Execute Lua code directly.
+        
+        Args:
+            lua_code: Lua code to execute
+        """
+        try:
+            print(f"[LuaManager] Executing Lua code ({len(lua_code)} bytes)")
+            code_preview = lua_code[:100] + "..." if len(lua_code) > 100 else lua_code
+            print(f"[LuaManager] Code preview: {code_preview}")
+            
+            self.emulator.bluetooth.script_running = True
+            self.lua.execute(lua_code)
+            print(f"[LuaManager] Lua code executed successfully")
+        except Exception as e:
+            print(f"[LuaManager] Error executing Lua code: {e}")
+            import traceback
+            traceback.print_exc()  # Print full traceback for better debugging
+            
+            # Try to print the Lua code that caused the error
+            lines = lua_code.split('\n')
+            print(f"[LuaManager] Lua code that caused the error:")
+            for i, line in enumerate(lines):
+                print(f"{i+1}: {line}")
+        finally:
+            self.emulator.bluetooth.script_running = False
+
     def register_callback(self, name: str, callback: Any) -> None:
         """
         Register a callback that can be called from Lua code.
